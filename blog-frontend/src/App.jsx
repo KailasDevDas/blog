@@ -29,7 +29,7 @@ function App() {
 				</header>
 
 				{/* Main Content Area */}
-				<main className="flex-grow w-full max-w-5xl mx-auto px-6 py-8">
+				<main>
 					<Routes>
 						<Route path="/" element={<Home />} />
 						<Route path="/create" element={<CreatePost />} />

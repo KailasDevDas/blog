@@ -80,7 +80,7 @@ export default function Home() {
 	const gridPosts = !query ? posts.slice(1) : posts;
 
 	return (
-		<div className="space-y-12 pb-20">
+		<div className="flex-grow w-full max-w-screen-xl mx-auto space-y-12 pb-20">
 			<header className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-gray-100 pb-10">
 				<div>
 					<h1 className="text-5xl font-black text-gray-900 tracking-tight">
