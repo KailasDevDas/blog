@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { format } from "date-fns";
-import { Helmet } from "react-helmet-async"; // Add this
+import { Helmet } from "react-helmet-async";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import {
@@ -12,6 +12,7 @@ import {
 	Share2,
 	ChevronLeft,
 	List as ListIcon,
+	ArrowRight,
 } from "lucide-react";
 
 const BlockRenderer = ({ block }) => {
@@ -116,9 +117,9 @@ const BlockRenderer = ({ block }) => {
 
 		case "table":
 			return (
-				<div className="overflow-x-auto my-10 border border-gray-100 rounded-2xl shadow-sm">
+				<div className="overflow-x-auto my-10 border border-gray-200 rounded-xl shadow-sm">
 					<table className="w-full text-left border-collapse">
-						<tbody className="divide-y divide-gray-100">
+						<tbody className="divide-y divide-gray-200">
 							{block.data.content.map((row, i) => (
 								<tr
 									key={i}
@@ -194,6 +195,7 @@ const BlockRenderer = ({ block }) => {
 export default function PostDetail() {
 	const { slug } = useParams();
 	const [post, setPost] = useState(null);
+	const [related, setRelated] = useState([]);
 	const [scrollProgress, setScrollProgress] = useState(0);
 
 	useEffect(() => {
@@ -208,10 +210,18 @@ export default function PostDetail() {
 	}, []);
 
 	useEffect(() => {
+		// Fetch post and related posts simultaneously
 		axios
 			.get(`http://localhost:5000/api/posts/${slug}`)
-			.then((res) => setPost(res.data))
+			.then((res) => {
+				setPost(res.data);
+				return axios.get(`http://localhost:5000/api/posts/${slug}/related`);
+			})
+			.then((res) => setRelated(res.data))
 			.catch((err) => console.error(err));
+
+		// Reset scroll position on slug change
+		window.scrollTo(0, 0);
 	}, [slug]);
 
 	if (!post)
@@ -229,22 +239,10 @@ export default function PostDetail() {
 
 	return (
 		<div className="relative">
-			{/* SEO SETTINGS */}
 			<Helmet>
 				<title>{post.title} | DevBlog</title>
 				<meta name="description" content={firstParagraph} />
-				<meta property="og:title" content={post.title} />
-				<meta property="og:description" content={firstParagraph} />
-				<meta
-					property="og:image"
-					content={
-						post.coverImage || "https://yourdomain.com/default-share.png"
-					}
-				/>
-				<meta property="og:type" content="article" />
-				<meta name="twitter:card" content="summary_large_image" />
-				<meta name="twitter:title" content={post.title} />
-				<meta name="twitter:image" content={post.coverImage} />
+				<meta property="og:image" content={post.coverImage} />
 			</Helmet>
 
 			<div className="fixed top-0 left-0 w-full h-1.5 z-[60] bg-gray-100">
@@ -287,7 +285,7 @@ export default function PostDetail() {
 								{post.title}
 							</h1>
 							<div className="flex flex-wrap items-center gap-8 text-sm text-gray-400 font-bold border-y border-gray-100 py-8 uppercase tracking-widest">
-								<div className="flex items-center gap-3">
+								<div className="flex items-center gap-3 text-gray-900">
 									<div className="w-12 h-12 bg-gray-900 rounded-2xl flex items-center justify-center text-white text-xl shadow-xl">
 										{post.author.charAt(0)}
 									</div>
@@ -311,6 +309,38 @@ export default function PostDetail() {
 								<BlockRenderer key={block.id} block={block} />
 							))}
 						</section>
+
+						{/* RELATED POSTS SECTION */}
+						{related.length > 0 && (
+							<section className="mt-24 pt-16 border-t border-gray-100">
+								<h3 className="text-3xl font-black text-gray-900 mb-10 tracking-tight">
+									Keep Reading
+								</h3>
+								<div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+									{related.map((r) => (
+										<Link key={r.id} to={`/post/${r.slug}`} className="group">
+											<div className="aspect-video rounded-2xl overflow-hidden mb-4 bg-gray-100 shadow-sm border border-gray-50">
+												<img
+													src={
+														r.coverImage ||
+														"https://images.unsplash.com/photo-1498050108023-c5249f4df085"
+													}
+													alt={r.title}
+													className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+												/>
+											</div>
+											<h4 className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">
+												{r.title}
+											</h4>
+											<div className="flex items-center justify-between mt-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">
+												<span>{r.author}</span>
+												<ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+											</div>
+										</Link>
+									))}
+								</div>
+							</section>
+						)}
 					</article>
 
 					<aside className="lg:col-span-3 space-y-12">
@@ -334,15 +364,13 @@ export default function PostDetail() {
 								</div>
 							)}
 							<div className="bg-indigo-600 rounded-3xl p-8 text-white shadow-2xl shadow-indigo-200">
-								<h3 className="text-2xl font-black mb-3 text-white">
-									Dev Insider
-								</h3>
+								<h3 className="text-2xl font-black mb-3">Dev Insider</h3>
 								<p className="text-indigo-100 text-sm mb-6 leading-relaxed">
 									The best technical tutorials delivered directly to your inbox
 									every Sunday.
 								</p>
 								<input
-									className="w-full bg-indigo-500 border border-indigo-400 p-4 rounded-xl text-sm mb-4 outline-none placeholder:text-indigo-200 focus:ring-2 focus:ring-white text-white"
+									className="w-full bg-indigo-500 border border-indigo-400 p-4 rounded-xl text-sm mb-4 outline-none placeholder:text-indigo-200 focus:ring-2 focus:ring-white"
 									placeholder="Email address..."
 								/>
 								<button className="w-full bg-white text-indigo-600 font-black py-4 rounded-xl hover:bg-indigo-50 transition-colors uppercase tracking-widest text-xs">
