@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { PrismaClient } = require("@prisma/client");
+const jwt = require("jsonwebtoken");
 const readingTime = require("reading-time");
 const multer = require("multer");
 const path = require("path");
@@ -8,148 +9,117 @@ require("dotenv").config();
 
 const app = express();
 const prisma = new PrismaClient();
+const SECRET = process.env.JWT_SECRET || "your_jwt_secret_key";
 
-// --- IMAGE UPLOAD CONFIG ---
-const storage = multer.diskStorage({
-	destination: "uploads/",
-	filename: (req, file, cb) => {
-		cb(null, Date.now() + path.extname(file.originalname));
-	},
-});
-const upload = multer({ storage });
-app.use("/uploads", express.static("uploads")); // Make uploads folder public
-
+// --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+app.use("/uploads", express.static("uploads"));
 
-// 1. CREATE a new post with auto-calculated reading time
-app.post("/api/posts", async (req, res) => {
+// --- AUTH MIDDLEWARE ---
+const authenticate = (req, res, next) => {
+	const authHeader = req.headers.authorization;
+	if (!authHeader) return res.status(401).json({ error: "No token provided" });
+
+	const token = authHeader.split(" ")[1];
 	try {
-		const { title, content, tags } = req.body;
+		const decoded = jwt.verify(token, SECRET);
+		req.user = decoded;
+		next();
+	} catch (err) {
+		return res.status(403).json({ error: "Invalid or expired token" });
+	}
+};
 
-		// Extract all text from Editor.js blocks to calculate reading time
+// --- AUTH ROUTES ---
+app.post("/api/login", async (req, res) => {
+	const { username, password } = req.body;
+	// Simple Admin check against .env
+	if (
+		username === process.env.ADMIN_USERNAME &&
+		password === process.env.ADMIN_PASSWORD
+	) {
+		const token = jwt.sign({ user: username }, SECRET, { expiresIn: "24h" });
+		return res.json({ token });
+	}
+	res.status(401).json({ error: "Invalid credentials" });
+});
+
+// --- POST ROUTES ---
+
+// 1. Protected Create Post
+app.post("/api/posts", authenticate, async (req, res) => {
+	try {
+		const { content } = req.body;
 		const rawText = content.blocks
-			.map((block) => {
-				if (block.type === "paragraph" || block.type === "header")
-					return block.data.text;
-				if (block.type === "code") return block.data.code;
-				if (block.type === "list") return block.data.items.join(" ");
-				return "";
-			})
+			.map((b) => b.data.text || b.data.code || "")
 			.join(" ");
-
 		const stats = readingTime(rawText);
 
 		const newPost = await prisma.post.create({
-			data: {
-				...req.body,
-				readingTime: Math.ceil(stats.minutes),
-			},
+			data: { ...req.body, readingTime: Math.ceil(stats.minutes) },
 		});
-
 		res.status(201).json(newPost);
 	} catch (error) {
-		console.error(error);
-		res.status(500).json({ error: "Failed to create post" });
+		res.status(500).json({ error: "Error creating post" });
 	}
 });
 
-// 2. GET all posts (with basic sorting)
-app.get("/api/posts", async (req, res) => {
-	try {
-		const posts = await prisma.post.findMany({
-			where: { isPublished: true },
-			orderBy: { createdAt: "desc" },
-		});
-		res.status(200).json(posts);
-	} catch (error) {
-		res.status(500).json({ error: "Failed to fetch posts" });
-	}
+// 2. Protected Image Upload
+const storage = multer.diskStorage({
+	destination: "uploads/",
+	filename: (req, file, cb) =>
+		cb(null, Date.now() + path.extname(file.originalname)),
 });
+const upload = multer({ storage });
 
-// 3. GET single post and update VIEW COUNT
-app.get("/api/posts/:slug", async (req, res) => {
-	try {
-		const post = await prisma.post.update({
-			where: { slug: req.params.slug },
-			data: { views: { increment: 1 } }, // Atomic increment
-		});
-		res.status(200).json(post);
-	} catch (error) {
-		res.status(404).json({ error: "Post not found" });
-	}
-});
-
-// 4. IMAGE UPLOAD ENDPOINT (For Editor.js)
-app.post("/api/upload", upload.single("image"), (req, res) => {
+app.post("/api/upload", authenticate, upload.single("image"), (req, res) => {
 	res.json({
 		success: 1,
-		file: {
-			url: `http://localhost:5000/uploads/${req.file.filename}`,
-		},
+		file: { url: `http://localhost:5000/uploads/${req.file.filename}` },
 	});
 });
 
+// 3. Public Get Routes
 app.get("/api/posts", async (req, res) => {
-	try {
-		const { query } = req.query; // Get search term from URL
+	const { query } = req.query;
+	const posts = await prisma.post.findMany({
+		where: {
+			isPublished: true,
+			...(query && {
+				OR: [
+					{ title: { contains: query, mode: "insensitive" } },
+					{ tags: { has: query } },
+				],
+			}),
+		},
+		orderBy: { createdAt: "desc" },
+	});
+	res.json(posts);
+});
 
-		const posts = await prisma.post.findMany({
-			where: {
-				isPublished: true,
-				...(query && {
-					OR: [
-						{ title: { contains: query, mode: "insensitive" } },
-						{ tags: { has: query } },
-					],
-				}),
-			},
-			orderBy: { createdAt: "desc" },
-		});
-		res.status(200).json(posts);
-	} catch (error) {
-		res.status(500).json({ error: "Failed to fetch posts" });
-	}
+app.get("/api/posts/:slug", async (req, res) => {
+	const post = await prisma.post.update({
+		where: { slug: req.params.slug },
+		data: { views: { increment: 1 } },
+	});
+	res.json(post);
 });
 
 app.get("/api/posts/:slug/related", async (req, res) => {
-	try {
-		const { slug } = req.params;
-
-		// 1. Get the current post to find its tags
-		const currentPost = await prisma.post.findUnique({
-			where: { slug },
-			select: { tags: true, id: true },
-		});
-
-		if (!currentPost) return res.status(404).json({ error: "Post not found" });
-
-		// 2. Find other posts that share at least one tag
-		const relatedPosts = await prisma.post.findMany({
-			where: {
-				isPublished: true,
-				id: { not: currentPost.id }, // Don't recommend the same post
-				tags: { hasSome: currentPost.tags }, // Match any tag
-			},
-			take: 3,
-			orderBy: { createdAt: "desc" },
-			select: {
-				id: true,
-				title: true,
-				slug: true,
-				coverImage: true,
-				author: true,
-				createdAt: true,
-			},
-		});
-
-		res.status(200).json(relatedPosts);
-	} catch (error) {
-		res.status(500).json({ error: "Failed to fetch related posts" });
-	}
+	const current = await prisma.post.findUnique({
+		where: { slug: req.params.slug },
+	});
+	const related = await prisma.post.findMany({
+		where: {
+			isPublished: true,
+			id: { not: current.id },
+			tags: { hasSome: current.tags },
+		},
+		take: 2,
+	});
+	res.json(related);
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-	console.log(`🚀 Server ready at http://localhost:${PORT}`),
-);
+const PORT = 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

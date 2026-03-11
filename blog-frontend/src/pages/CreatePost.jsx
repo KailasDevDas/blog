@@ -30,17 +30,16 @@ export default function CreatePost() {
 	const handlePublish = async () => {
 		if (!title) return alert("Title is required!");
 		setIsPublishing(true);
+		const token = localStorage.getItem("blog_token");
 
 		try {
 			const contentData = await editorRef.current.save();
-
-			// Find the first image block to use as the cover image automatically
 			const firstImage = contentData.blocks.find((b) => b.type === "image");
 
 			const postPayload = {
 				title,
 				slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-				author: "John Doe", // You can later replace this with auth user
+				author: "John Doe",
 				tags: tags
 					.split(",")
 					.map((t) => t.trim())
@@ -50,11 +49,17 @@ export default function CreatePost() {
 				isPublished: true,
 			};
 
-			await axios.post("http://localhost:5000/api/posts", postPayload);
+			await axios.post("http://localhost:5000/api/posts", postPayload, {
+				headers: { Authorization: `Bearer ${token}` },
+			});
 			navigate("/");
 		} catch (error) {
 			console.error(error);
-			alert("Publishing failed.");
+			alert(
+				error.response?.status === 403
+					? "Session expired. Please log in again."
+					: "Failed to publish",
+			);
 		} finally {
 			setIsPublishing(false);
 		}
