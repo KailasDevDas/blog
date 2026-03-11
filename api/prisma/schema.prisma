@@ -1,0 +1,25 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Post {
+  id           String   @id @default(uuid())
+  title        String
+  slug         String   @unique
+  excerpt      String?  // For SEO and preview cards
+  author       String
+  coverImage   String?
+  tags         String[]
+  category     String   @default("General")
+  content      Json     
+  readingTime  Int?     // Calculated on save
+  views        Int      @default(0)
+  isPublished  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
